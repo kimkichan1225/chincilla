@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body {
+      width: 128px;
+      height: 128px;
+      overflow: hidden;
+      background: transparent;
+    }
+    #pet {
+      width: 128px;
+      height: 128px;
+      cursor: grab;
+      -webkit-app-region: no-drag;
+      image-rendering: pixelated;
+    }
+    #pet.flipped {
+      transform: scaleX(-1);
+    }
+  </style>
+</head>
+<body>
+  <img id="pet" />
+  <script>
+    const { ipcRenderer } = require('electron');
+    const path = require('path');
+    const fs = require('fs');
+
+    const pet = document.getElementById('pet');
+    const SPRITE_DIR = path.join(__dirname, 'Chinchilla');
+
+    // ── Animation definitions ──
+    const ACTIONS = [
+      'angry', 'breath', 'eat', 'heart', 'hold',
+      'poop', 'sleep', 'stand', 'walk',
+    ];
+
+    // Preload all SVGs as data URIs
+    const frames = {};
+    ACTIONS.forEach(action => {
+      frames[action] = [];
+      for (let i = 1; i <= 4; i++) {
+        const filePath = path.join(SPRITE_DIR, `${action}_f${i}.svg`);
+        const svg = fs.readFileSync(filePath, 'utf8');
+        frames[action].push('data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'));
+      }
+    });
+
+    // ── State machine ──
+    let state = 'stand';
+    let frameIndex = 0;
+    let facingLeft = false; // false = right
+    let screenBounds = { width: 1920, height: 1080 };
+    let petX = 960;
+    let petY = 900;
+    let walkSpeed = 2;
+    let stateTimer = 0;
+    let stateDuration = 120; // frames until next state change
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    ipcRenderer.on('screen-bounds', (e, bounds) => {
+      screenBounds = bounds;
+      const pos = ipcRenderer.sendSync('get-position');
+      petX = pos.x;
+      petY = pos.y;
+    });
+
+    // ── State transitions ──
+    const IDLE_STATES = ['stand', 'breath', 'sleep', 'eat'];
+    const WALK_CHANCE = 0.5;
+
+    function pickNextState() {
+      if (state === 'hold') return; // don't auto-transition from hold
+
+      const rand = Math.random();
+      if (rand < WALK_CHANCE) {
+        state = 'walk';
+        // Maybe change direction
+        if (Math.random() < 0.3) facingLeft = !facingLeft;
+        stateDuration = 100 + Math.floor(Math.random() * 200);
+      } else {
+        state = IDLE_STATES[Math.floor(Math.random() * IDLE_STATES.length)];
+        stateDuration = 80 + Math.floor(Math.random() * 160);
+      }
+      stateTimer = 0;
+      frameIndex = 0;
+    }
+
+    // ── Click interactions ──
+    let clickCount = 0;
+    let clickResetTimer = null;
+
+    pet.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      const pos = ipcRenderer.sendSync('get-position');
+      dragOffsetX = e.screenX - pos.x;
+      dragOffsetY = e.screenY - pos.y;
+      state = 'hold';
+      frameIndex = 0;
+      pet.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      petX = e.screenX - dragOffsetX;
+      petY = e.screenY - dragOffsetY;
+      ipcRenderer.send('move-window', { x: petX, y: petY });
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      pet.style.cursor = 'grab';
+
+      // Drop: fall to bottom
+      const groundY = screenBounds.height - 128;
+      petY = groundY;
+      ipcRenderer.send('move-window', { x: petX, y: petY });
+
+      // Check if it was a click (not a drag)
+      const pos = ipcRenderer.sendSync('get-position');
+      clickCount++;
+      clearTimeout(clickResetTimer);
+      clickResetTimer = setTimeout(() => { clickCount = 0; }, 1000);
+
+      if (clickCount >= 3) {
+        state = 'angry';
+        stateDuration = 60;
+        stateTimer = 0;
+        frameIndex = 0;
+        clickCount = 0;
+      } else {
+        state = 'heart';
+        stateDuration = 50;
+        stateTimer = 0;
+        frameIndex = 0;
+      }
+    });
+
+    // ── Right click: poop ──
+    pet.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      state = 'poop';
+      stateDuration = 60;
+      stateTimer = 0;
+      frameIndex = 0;
+    });
+
+    // ── Animation loop ──
+    const FRAME_RATE = 150; // ms per frame
+
+    function update() {
+      // Update frame
+      const actionFrames = frames[state];
+      if (actionFrames) {
+        pet.src = actionFrames[frameIndex % 4];
+      }
+
+      // Flip sprite based on direction
+      if (facingLeft) {
+        pet.classList.remove('flipped');
+      } else {
+        pet.classList.add('flipped');
+      }
+
+      // Walk movement
+      if (state === 'walk' && !isDragging) {
+        const dir = facingLeft ? -1 : 1;
+        petX += dir * walkSpeed;
+
+        // Bounce off screen edges
+        if (petX <= 0) {
+          petX = 0;
+          facingLeft = false;
+        } else if (petX >= screenBounds.width - 128) {
+          petX = screenBounds.width - 128;
+          facingLeft = true;
+        }
+
+        ipcRenderer.send('move-window', { x: petX, y: petY });
+      }
+
+      // Advance frame
+      frameIndex = (frameIndex + 1) % 4;
+
+      // State timer
+      if (!isDragging) {
+        stateTimer++;
+        if (stateTimer >= stateDuration) {
+          pickNextState();
+        }
+      }
+    }
+
+    setInterval(update, FRAME_RATE);
+
+    // Start with a brief stand, then go
+    setTimeout(() => pickNextState(), 2000);
+  </script>
+</body>
+</html>
