@@ -5,10 +5,15 @@
   <style>
     * { margin: 0; padding: 0; }
     html, body {
-      width: 128px;
-      height: 128px;
+      width: 200px;
+      height: 200px;
       overflow: hidden;
       background: transparent;
+    }
+    #container {
+      width: 200px;
+      height: 200px;
+      position: relative;
     }
     #pet {
       width: 128px;
@@ -16,14 +21,52 @@
       cursor: grab;
       -webkit-app-region: no-drag;
       image-rendering: pixelated;
+      position: absolute;
+      bottom: 0;
+      left: 36px;
     }
     #pet.flipped {
       transform: scaleX(-1);
     }
+    #bubble {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      border: 2px solid #333;
+      border-radius: 12px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: 'Malgun Gothic', sans-serif;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 8px solid #333;
+    }
+    #bubble.show {
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
-  <img id="pet" />
+  <div id="container">
+    <div id="bubble"></div>
+    <img id="pet" />
+  </div>
   <script>
     const { ipcRenderer } = require('electron');
     const path = require('path');
@@ -91,6 +134,33 @@
       frameIndex = 0;
     }
 
+    // ── Speech bubble ──
+    const bubble = document.getElementById('bubble');
+    let bubbleTimer = null;
+
+    const MESSAGES = {
+      heart: ['좋아!', '헤헤~', '기분 좋다!', '사랑해~', '또 만져줘!', '행복해!'],
+      angry: ['화났어!!', '그만해!', '싫어!', '너무해!', '짜증나!'],
+      poop: ['뿌직...', '시원하다~', '아무도 안봤지?', '어흑...'],
+      sleep: ['zzZ...', '졸려...', '꿈나라...'],
+      eat: ['냠냠~', '맛있다!', '더 줘!', '배고팠어~'],
+      stand: ['뭐해?', '심심해~', '놀아줘!', '...?'],
+      breath: ['후~', '평화롭다~', '좋은 날이다'],
+      walk: ['산책 중~', '어디 가볼까?', '여기는 어디?', '탐험 중!'],
+      hold: ['으악!', '내려줘!', '높다!', '무서워!'],
+    };
+
+    function showBubble(action) {
+      const msgs = MESSAGES[action] || MESSAGES.stand;
+      const msg = msgs[Math.floor(Math.random() * msgs.length)];
+      bubble.textContent = msg;
+      bubble.classList.add('show');
+      clearTimeout(bubbleTimer);
+      bubbleTimer = setTimeout(() => {
+        bubble.classList.remove('show');
+      }, 2000);
+    }
+
     // ── Click interactions ──
     let clickCount = 0;
     let clickResetTimer = null;
@@ -103,6 +173,7 @@
       state = 'hold';
       frameIndex = 0;
       pet.style.cursor = 'grabbing';
+      showBubble('hold');
     });
 
     document.addEventListener('mousemove', (e) => {
@@ -118,7 +189,7 @@
       pet.style.cursor = 'grab';
 
       // Drop: fall to bottom
-      const groundY = screenBounds.height - 128;
+      const groundY = screenBounds.height - 200;
       petY = groundY;
       ipcRenderer.send('move-window', { x: petX, y: petY });
 
@@ -134,11 +205,13 @@
         stateTimer = 0;
         frameIndex = 0;
         clickCount = 0;
+        showBubble('angry');
       } else {
         state = 'heart';
         stateDuration = 50;
         stateTimer = 0;
         frameIndex = 0;
+        showBubble('heart');
       }
     });
 
@@ -149,6 +222,7 @@
       stateDuration = 60;
       stateTimer = 0;
       frameIndex = 0;
+      showBubble('poop');
     });
 
     // ── Animation loop ──

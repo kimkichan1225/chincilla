@@ -4,7 +4,7 @@ const fs = require('fs');
 const https = require('https');
 const { execFile } = require('child_process');
 
-const CURRENT_VERSION = '1.0.0';
+const CURRENT_VERSION = '1.1.0';
 const VERSION_URL = 'https://raw.githubusercontent.com/kimkichan1225/chincilla/main/version.json';
 
 let win;
@@ -111,10 +111,10 @@ function createWindow() {
   const { width, height } = display.workAreaSize;
 
   win = new BrowserWindow({
-    width: 128,
-    height: 128,
+    width: 200,
+    height: 200,
     x: Math.floor(width / 2),
-    y: height - 128,
+    y: height - 200,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
